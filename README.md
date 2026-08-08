@@ -1,19 +1,8 @@
-# Welcome to OpenJDK 25 Updates!
+# Java 25 for macOS High Sierra 
 
-The JDK 25 Updates project uses two GitHub repositories.
-Updates are continuously developed in the repository [jdk25u-dev](https://github.com/openjdk/jdk25u-dev). This is the repository usually targeted by contributors.
-The [jdk25u](https://github.com/openjdk/jdk25u) repository is used for rampdown of the update releases of jdk25u and only accepts critical changes that must make the next release during rampdown. (You probably do not want to target jdk25u).
+This is a port of Java 25 for macOS High Sierra (Could also probably work on macOS Mojave but hasn't been tested)
 
-For more OpenJDK 25 updates specific information such as timelines and contribution guidelines see the [project wiki page](https://wiki.openjdk.org/display/JDKUpdates/JDK+25u/).
+You can download it in the releases tab
 
-
-For build instructions please see the
-[online documentation](https://openjdk.org/groups/build/doc/building.html),
-or either of these files:
-
-- [doc/building.html](doc/building.html) (html version)
-- [doc/building.md](doc/building.md) (markdown version)
-
-See <https://openjdk.org/> for more information about the OpenJDK
-Community and the JDK and see <https://bugs.openjdk.org> for JDK issue
-tracking.
+If you plan to run modern Minecraft you will need to replace the games built in OpenAL with a different one
+I downloaded OpenAL through MacPorts by running this command ```sudo port install openal-soft```
