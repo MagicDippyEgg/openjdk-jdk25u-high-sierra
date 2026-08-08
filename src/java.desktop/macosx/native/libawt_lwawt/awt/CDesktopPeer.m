@@ -59,31 +59,45 @@ JNI_COCOA_ENTER(env);
         return -1;
     }
 
-    // Prepare NSOpenConfig object
     NSArray<NSURL *> *urls = @[urlToOpen];
-    NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
-    configuration.activates = YES; // To bring app to foreground
-    configuration.promptsUserIfNeeded = YES; // To allow macOS desktop prompts
+    if (@available(macOS 10.15, *)) {
+        // Prepare NSOpenConfig object
+        NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
+        configuration.activates = YES; // To bring app to foreground
+        configuration.promptsUserIfNeeded = YES; // To allow macOS desktop prompts
 
-    // dispatch semaphores used to wait for the completion handler to update and return status
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)); // 1 second timeout
+        // dispatch semaphores used to wait for the completion handler to update and return status
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)); // 1 second timeout
 
-    // Asynchronous call to openURL
-    dispatch_retain(semaphore);
-    [[NSWorkspace sharedWorkspace] openURLs:urls
-                                    withApplicationAtURL:appURI
-                                    configuration:configuration
-                                    completionHandler:^(NSRunningApplication *app, NSError *error) {
-        if (error) {
-            status = (OSStatus) error.code;
-        }
-        dispatch_semaphore_signal(semaphore);
+        // Asynchronous call to openURL
+        dispatch_retain(semaphore);
+        [[NSWorkspace sharedWorkspace] openURLs:urls
+                                        withApplicationAtURL:appURI
+                                        configuration:configuration
+                                        completionHandler:^(NSRunningApplication *app, NSError *error) {
+            if (error) {
+                status = (OSStatus) error.code;
+            }
+            dispatch_semaphore_signal(semaphore);
+            dispatch_release(semaphore);
+        }];
+
+        dispatch_semaphore_wait(semaphore, timeout);
         dispatch_release(semaphore);
-    }];
-
-    dispatch_semaphore_wait(semaphore, timeout);
-    dispatch_release(semaphore);
+    } else {
+        // Fallback for macOS 10.13 and 10.14
+        NSString *bundleID = nil;
+        if (appURI != nil) {
+            bundleID = [[NSBundle bundleWithURL:appURI] bundleIdentifier];
+        }
+        BOOL success = [[NSWorkspace sharedWorkspace] openURLs:urls
+                                       withAppBundleIdentifier:bundleID
+                                                       options:NSWorkspaceLaunchDefault
+                                        additionalEventParamDescriptor:nil
+                                             launchIdentifiers:NULL];
+        status = success ? noErr : -1;
+    }
 
 JNI_COCOA_EXIT(env);
     return status;
@@ -111,58 +125,98 @@ JNI_COCOA_ENTER(env);
     NSURL *appURI = [workspace URLForApplicationToOpenURL:urlToOpen];
     NSURL *defaultTerminalApp = [workspace URLForApplicationToOpenURL:[NSURL URLWithString:@"file:///bin/sh"]];
 
-    // Prepare NSOpenConfig object
     NSArray<NSURL *> *urls = @[urlToOpen];
-    NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
-    configuration.activates = YES; // To bring app to foreground
-    configuration.promptsUserIfNeeded = YES;  // To allow macOS desktop prompts
+    if (@available(macOS 10.15, *)) {
+        NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
+        configuration.activates = YES; // To bring app to foreground
+        configuration.promptsUserIfNeeded = YES;  // To allow macOS desktop prompts
 
-    // pre-checks for open/print/edit before calling openURLs API
-    if (action == sun_lwawt_macosx_CDesktopPeer_OPEN
-            || action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
-        if (appURI == nil
-            || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]
-            || [[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
-            [urlToOpen release];
-            return -1;
+        // pre-checks for open/print/edit before calling openURLs API
+        if (action == sun_lwawt_macosx_CDesktopPeer_OPEN
+                || action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
+            if (appURI == nil
+                || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]
+                || [[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
+                [urlToOpen release];
+                return -1;
+            }
+            // Additionally set forPrinting=TRUE for print
+            if (action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
+                configuration.forPrinting = YES;
+            }
+        } else if (action == sun_lwawt_macosx_CDesktopPeer_EDIT) {
+            if (appURI == nil
+                || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]) {
+                [urlToOpen release];
+                return -1;
+            }
+            // for EDIT: if (defaultApp = TerminalApp) then set appURI = DefaultTextEditor
+            if ([[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
+                NSString *path  = NormalizedPathNSStringFromJavaString(env, jtmpTxtPath);
+                NSURL *tempFilePath = [NSURL fileURLWithPath:(NSString *)path];
+                appURI = [workspace URLForApplicationToOpenURL:tempFilePath];
+            }
         }
-        // Additionally set forPrinting=TRUE for print
-        if (action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
-            configuration.forPrinting = YES;
-        }
-    } else if (action == sun_lwawt_macosx_CDesktopPeer_EDIT) {
-        if (appURI == nil
-            || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]) {
-            [urlToOpen release];
-            return -1;
-        }
-        // for EDIT: if (defaultApp = TerminalApp) then set appURI = DefaultTextEditor
-        if ([[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
-            NSString *path  = NormalizedPathNSStringFromJavaString(env, jtmpTxtPath);
-            NSURL *tempFilePath = [NSURL fileURLWithPath:(NSString *)path];
-            appURI = [workspace URLForApplicationToOpenURL:tempFilePath];
-        }
-    }
 
-    // dispatch semaphores used to wait for the completion handler to update and return status
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)); // 1 second timeout
+        // dispatch semaphores used to wait for the completion handler to update and return status
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)); // 1 second timeout
 
-    // Asynchronous call - openURLs:withApplicationAtURL
-    dispatch_retain(semaphore);
-    [[NSWorkspace sharedWorkspace] openURLs:urls
-                                   withApplicationAtURL:appURI
-                                   configuration:configuration
-                                   completionHandler:^(NSRunningApplication *app, NSError *error) {
-        if (error) {
-            status = (OSStatus) error.code;
-        }
-        dispatch_semaphore_signal(semaphore);
+        // Asynchronous call - openURLs:withApplicationAtURL
+        dispatch_retain(semaphore);
+        [[NSWorkspace sharedWorkspace] openURLs:urls
+                                       withApplicationAtURL:appURI
+                                       configuration:configuration
+                                       completionHandler:^(NSRunningApplication *app, NSError *error) {
+            if (error) {
+                status = (OSStatus) error.code;
+            }
+            dispatch_semaphore_signal(semaphore);
+            dispatch_release(semaphore);
+        }];
+
+        dispatch_semaphore_wait(semaphore, timeout);
         dispatch_release(semaphore);
-    }];
+    } else {
+        // pre-checks for open/print/edit before calling openURLs API (without configuration)
+        if (action == sun_lwawt_macosx_CDesktopPeer_OPEN
+                || action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
+            if (appURI == nil
+                || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]
+                || [[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
+                [urlToOpen release];
+                return -1;
+            }
+        } else if (action == sun_lwawt_macosx_CDesktopPeer_EDIT) {
+            if (appURI == nil
+                || [[urlToOpen absoluteString] containsString:[appURI absoluteString]]) {
+                [urlToOpen release];
+                return -1;
+            }
+            // for EDIT: if (defaultApp = TerminalApp) then set appURI = DefaultTextEditor
+            if ([[defaultTerminalApp absoluteString] containsString:[appURI absoluteString]]) {
+                NSString *path  = NormalizedPathNSStringFromJavaString(env, jtmpTxtPath);
+                NSURL *tempFilePath = [NSURL fileURLWithPath:(NSString *)path];
+                appURI = [workspace URLForApplicationToOpenURL:tempFilePath];
+            }
+        }
 
-    dispatch_semaphore_wait(semaphore, timeout);
-    dispatch_release(semaphore);
+        NSWorkspaceLaunchOptions options = NSWorkspaceLaunchDefault;
+        if (action == sun_lwawt_macosx_CDesktopPeer_PRINT) {
+            options |= NSWorkspaceLaunchAndPrint;
+        }
+
+        NSString *bundleID = nil;
+        if (appURI != nil) {
+            bundleID = [[NSBundle bundleWithURL:appURI] bundleIdentifier];
+        }
+        BOOL success = [[NSWorkspace sharedWorkspace] openURLs:urls
+                                       withAppBundleIdentifier:bundleID
+                                                       options:options
+                                        additionalEventParamDescriptor:nil
+                                             launchIdentifiers:NULL];
+        status = success ? noErr : -1;
+    }
 
     [urlToOpen release];
 JNI_COCOA_EXIT(env);

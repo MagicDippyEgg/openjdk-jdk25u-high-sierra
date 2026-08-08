@@ -35,6 +35,10 @@
 #define DEFAULT_DEVICE_HEIGHT 768
 #define DEFAULT_DEVICE_DPI 72
 
+#ifndef NSBundleExecutableArchitectureARM64
+#define NSBundleExecutableArchitectureARM64 0x0100000c
+#endif
+
 static NSInteger architecture = -1;
 /*
  * Convert the mode string to the more convenient bits per pixel value

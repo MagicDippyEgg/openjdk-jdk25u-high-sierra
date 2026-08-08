@@ -1,0 +1,55 @@
+name: 'Build (macOS High Sierra)'
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build
+    runs-on: macos-15-intel
+
+    steps:
+      - name: 'Checkout the JDK source'
+        uses: actions/checkout@v6
+
+      - name: 'Get the BootJDK'
+        id: bootjdk
+        uses: ./.github/actions/get-bootjdk
+        with:
+          platform: macos-x64
+
+      - name: 'Install toolchain and dependencies'
+        run: |
+          brew install autoconf make
+          sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+          echo '/usr/local/opt/make/libexec/gnubin' >> $GITHUB_PATH
+
+      - name: 'Configure'
+        run: |
+          bash configure \
+            --with-conf-name=macos-x64 \
+            --with-debug-level=release \
+            --with-version-opt=${{ github.actor }}-${{ github.sha }} \
+            --with-boot-jdk=${{ steps.bootjdk.outputs.path }} \
+            --with-zlib=system \
+            --with-jmod-compress=zip-1 \
+            --with-macosx-version-max=10.13.00 \
+            || (echo "Dumping config.log:" && cat config.log && exit 1)
+
+      - name: 'Build'
+        id: build
+        uses: ./.github/actions/do-build
+        with:
+          make-target: 'product-bundles'
+          platform: macos-x64
+
+      - name: 'Upload bundles'
+        uses: ./.github/actions/upload-bundles
+        with:
+          platform: macos-x64
